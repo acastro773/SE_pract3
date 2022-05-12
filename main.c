@@ -7,11 +7,15 @@
 TaskHandle_t tskDis = NULL;
 TaskHandle_t tskSum = NULL;
 TaskHandle_t tskRec = NULL;
+TaskHandle_t tskCnt = NULL;
+TaskHandle_t tskMul = NULL;
 int status = 0;
 int rep = 0;
 int cont = 0;
 int status_btn = 0;
+int status_btn2 = 0;
 double points = 0.0;
+double mult = 1.0;
 QueueHandle_t myQ;
 
 void irclk_ini()
@@ -99,33 +103,29 @@ void led_red_off(void) {
 void PORTDIntHandler(void) {
   int pressed_switch = PORTC->ISFR;
   PORTC->ISFR = 0xFFFFFFFF; // Clear IRQ
+	if(pressed_switch == (0x8)) {
+		status_btn2 = 1;
+	} else {
+		status_btn2 = 0;
+	}
 	if(pressed_switch == (0x1000)) {
 		status_btn = 1;
-		led_red_on();
 	} else {
 		status_btn = 0;
-		led_red_off();
 	}
 }
 
 void taskSumSwitch(void *pvParameters)
 {
     int sum = 0;
-    myQ = xQueueCreate(5, sizeof(sum));
     sum = 1;
-    xQueueSend(myQ, (void*)sum, (TickType_t) 0);
-    vTaskDelay(1000/portTICK_RATE_MS);
-    led_green_on();
     for (;;) {
-	/*if (status_btn == 1) {	
-		sum = 5;
-		xQueueSend(myQ, (void*)sum, (TickType_t) 0);
-		vTaskDelay(100/portTICK_RATE_MS);
-        } else {
-		sum = 1;
-		xQueueSend(myQ, (void*)sum, (TickType_t) 0);
-		vTaskDelay(1000/portTICK_RATE_MS);
-	}*/
+	if (status_btn == 1) {	
+		sum = 5*mult;
+		if (myQ != 0)
+    			xQueueSend(myQ, (void*)&sum, (TickType_t) 0);
+		status_btn = 0;
+        }
     }
 }
 
@@ -133,11 +133,39 @@ void taskReceiveP(void *pvParameters)
 {
     int sum = 0;
     for (;;) {
-	if (myQ != 0) {
-		if (xQueueReceive(myQ, (void*)sum, (TickType_t) 100))
+	if (myQ != NULL) {
+		if (xQueueReceive(myQ, &sum, (TickType_t) 5))
 			points = points+(int)sum;
-		
 	}
+    }
+}
+
+void taskCountSec(void *pvParameters)
+{
+    TickType_t lastUnblock;
+    int sum = 1;
+    lastUnblock = xTaskGetTickCount();
+    for (;;) {
+	if (myQ != NULL) {
+		xQueueSend(myQ, (void*)&sum, (TickType_t) 0);
+		vTaskDelayUntil(&lastUnblock, 1000*configTICK_RATE_HZ/1000);
+	}
+    }
+}
+
+void taskMultiplier(void *pvParameters)
+{
+    for (;;) {
+	if (points >= 50*mult)
+		led_green_on();
+	else led_green_off();
+	if (status_btn2 == 1) {	
+		if (points >= 50*mult) {
+			points = points-(50*mult);
+			mult = mult+0.2;
+		}
+		status_btn2 = 0;
+        }
     }
 }
 
@@ -157,12 +185,18 @@ int main(void)
 	bt1_init();
 	bt2_init();
 
+	myQ = xQueueCreate(1, sizeof(int));
+
 	xTaskCreate(taskDisplay, "TaskDisplay", 
 		configMINIMAL_STACK_SIZE, (void *)NULL, 1, &tskDis);
 	xTaskCreate(taskReceiveP, "TaskReceiveP", 
 		configMINIMAL_STACK_SIZE, (void *)NULL, 1, &tskRec);
+	xTaskCreate(taskCountSec, "TaskCountSec", 
+		configMINIMAL_STACK_SIZE, (void *)NULL, 1, &tskCnt);
 	xTaskCreate(taskSumSwitch, "TaskSumSwitch", 
 		configMINIMAL_STACK_SIZE, (void *)NULL, 1, &tskSum);
+	xTaskCreate(taskMultiplier, "TaskMultiplier", 
+		configMINIMAL_STACK_SIZE, (void *)NULL, 1, &tskMul);
 	/* start the scheduler */
 	vTaskStartScheduler();
 
